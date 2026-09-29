@@ -4,6 +4,7 @@ APP=opencode
 
 MUTED='\033[0;2m'
 RED='\033[0;31m'
+GREEN='\033[0;32m'
 ORANGE='\033[38;5;214m'
 NC='\033[0m' # No Color
 
@@ -17,17 +18,20 @@ Options:
     -h, --help              Display this help message
     -v, --version <version> Install a specific version (e.g., 1.0.180)
     -b, --binary <path>     Install from a local binary instead of downloading
+    -s, --service           Install and enable background scheduler daemon service
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
 
 Examples:
     curl -fsSL https://opencode.ai/install | bash
     curl -fsSL https://opencode.ai/install | bash -s -- --version 1.0.180
     ./install --binary /path/to/opencode
+    ./install --service
 EOF
 }
 
 requested_version=${VERSION:-}
 no_modify_path=false
+enable_service=false
 binary_path=""
 
 while [[ $# -gt 0 ]]; do
@@ -56,6 +60,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-modify-path)
             no_modify_path=true
+            shift
+            ;;
+        -s|--service)
+            enable_service=true
             shift
             ;;
         *)
@@ -441,6 +449,80 @@ fi
 if [ -n "${GITHUB_ACTIONS-}" ] && [ "${GITHUB_ACTIONS}" == "true" ]; then
     echo "$INSTALL_DIR" >> $GITHUB_PATH
     print_message info "Added $INSTALL_DIR to \$GITHUB_PATH"
+fi
+
+setup_daemon_service() {
+    print_message info "${MUTED}Setting up background scheduler daemon service...${NC}"
+    local os_type
+    os_type=$(uname -s)
+
+    if [[ "$os_type" == "Darwin" ]]; then
+        local plist_dir="$HOME/Library/LaunchAgents"
+        local plist_file="$plist_dir/ai.opencode.scheduler.plist"
+        mkdir -p "$plist_dir"
+
+        cat <<EOF > "$plist_file"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.opencode.scheduler</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${INSTALL_DIR}/opencode</string>
+        <string>daemon</string>
+        <string>run</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${HOME}/.local/state/opencode/scheduler.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>${HOME}/.local/state/opencode/scheduler.stderr.log</string>
+</dict>
+</plist>
+EOF
+        mkdir -p "${HOME}/.local/state/opencode"
+        launchctl unload "$plist_file" 2>/dev/null || true
+        launchctl load "$plist_file" 2>/dev/null || true
+        print_message info "${GREEN}✓ Launchd service enabled: ai.opencode.scheduler${NC}"
+    elif command -v systemctl >/dev/null 2>&1 && systemctl --user list-units >/dev/null 2>&1; then
+        local service_dir="$HOME/.config/systemd/user"
+        local service_file="$service_dir/opencode-scheduler.service"
+        mkdir -p "$service_dir"
+
+        cat <<EOF > "$service_file"
+[Unit]
+Description=OpenCode Background Scheduler Daemon
+After=network.target
+
+[Service]
+ExecStart=${INSTALL_DIR}/opencode daemon run
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+EOF
+        systemctl --user daemon-reload
+        systemctl --user enable --now opencode-scheduler.service 2>/dev/null || true
+        print_message info "${GREEN}✓ systemd user service enabled and started: opencode-scheduler${NC}"
+    else
+        local cron_cmd="@reboot ${INSTALL_DIR}/opencode daemon start"
+        if command -v crontab >/dev/null 2>&1; then
+            (crontab -l 2>/dev/null | grep -v "opencode daemon start"; echo "$cron_cmd") | crontab - 2>/dev/null || true
+            print_message info "${GREEN}✓ Crontab @reboot entry configured for opencode daemon${NC}"
+        else
+            print_message warning "Could not auto-enable service. Start manually with: opencode daemon start"
+        fi
+    fi
+}
+
+if [[ "$enable_service" == "true" ]]; then
+    setup_daemon_service
 fi
 
 echo -e ""

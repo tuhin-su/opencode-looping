@@ -1,0 +1,22 @@
+Manage scheduled recurring or deferred background tasks and daemon jobs.
+Use this tool whenever the user asks to schedule tasks or run recurring operations (e.g. "every morning search stock news and tell me", "every monday check for PRs", "daily backup", "run every 2 hours").
+
+How to handle user scheduling requests:
+1. Recurrence Rule: Map natural user requests to schedules:
+   - "every morning" -> "daily at 8am" (or "daily at 9am")
+   - "every monday" / "every friday" -> "every monday at 9am" / "every friday at 9am"
+   - "every hour" -> "hourly"
+   - "every N hours / minutes" -> "every N hours / minutes"
+   - Custom cron expressions -> "min hour dom month dow" (e.g. "0 9 * * 1")
+
+2. Prompt Crafting:
+   When the user gives a high-level request (e.g. "every morning search stock news and tell me it"):
+   - Formulate a comprehensive, self-contained prompt for the future autonomous run (e.g. "Search for the latest stock market and financial news today using websearch. Summarize key market indices, earnings announcements, top gainers and losers, and save or output a concise market briefing.").
+   - Provide a clear, descriptive name (e.g. "Morning Stock News Briefing").
+
+3. Tool Actions:
+   - "add": Schedule a new background task. Parameters: 'schedule', 'prompt' (or 'command'), 'name'.
+   - "list": List all currently scheduled tasks, their schedules, next run time, and statuses.
+   - "remove": Remove a scheduled task by 'id'.
+   - "run": Immediately trigger execution of a scheduled task by 'id'.
+   - "status": Check if the scheduler daemon is active and view task statistics.
